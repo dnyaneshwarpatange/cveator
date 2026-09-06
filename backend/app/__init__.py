@@ -1,0 +1,1 @@
+"""CVE Monitor application package."""

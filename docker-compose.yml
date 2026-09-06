@@ -1,0 +1,203 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cve_monitor}
+      POSTGRES_USER: ${POSTGRES_USER:-cve_monitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "${REDIS_BIND_ADDRESS:-127.0.0.1}:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  smtp:
+    image: cve-monitor-postfix:local
+    build: ./infra/postfix
+    profiles: ["mail"]
+    hostname: ${MAIL_HOSTNAME:-mail.example.invalid}
+    environment:
+      MAIL_DOMAIN: ${MAIL_DOMAIN:-example.invalid}
+      MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mail.example.invalid}
+      DKIM_SELECTOR: ${DKIM_SELECTOR:-alerts}
+    volumes:
+      - ./infra/postfix/secrets:/run/dkim:ro
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
+    env_file: ${ENV_FILE:-.env}
+    ports:
+      - "${API_BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    init: true
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  web:
+    build: ./frontend
+    environment:
+      API_INTERNAL_BASE_URL: http://api:8000
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      NEXT_TELEMETRY_DISABLED: 1
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:3000:3000"
+    init: true
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  migrate:
+    build: ./backend
+    command: alembic upgrade head
+    env_file: ${ENV_FILE:-.env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  worker:
+    build: ./backend
+    command: celery -A app.worker.celery_app worker --loglevel=INFO --concurrency=2
+    env_file: ${ENV_FILE:-.env}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  bootstrap:
+    build: ./backend
+    command: python -m app.scripts.bootstrap_data
+    env_file: ${ENV_FILE:-.env}
+    init: true
+    restart: on-failure
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  beat:
+    build: ./backend
+    command: celery -A app.worker.celery_app beat --loglevel=INFO
+    env_file: ${ENV_FILE:-.env}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  edge:
+    image: caddy:2.11.4-alpine
+    profiles: ["edge"]
+    environment:
+      APP_ADDRESS: ${APP_ADDRESS:-http://localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  uptime:
+    image: louislam/uptime-kuma:2.5.3
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - uptime-data:/app/data
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    profiles: ["maintenance"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-cve_monitor}
+      PGUSER: ${POSTGRES_USER:-cve_monitor}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./infra/backup/backup.sh:/usr/local/bin/backup:ro
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:
+  prometheus-data:
+  uptime-data:
