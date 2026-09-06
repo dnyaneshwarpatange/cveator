@@ -2,8 +2,8 @@
 
 The application imports the entire official NVD CPE dictionary through the paginated
 [NVD products API](https://nvd.nist.gov/developers/products). This is a global catalog,
-not a collection of keyword samples. A bounded live lookup can populate a searched
-product while the first import is still running.
+not a collection of keyword samples. Search uses the committed local dictionary;
+coverage is incomplete until the full import finishes.
 
 Each official CPE entry retains its version and platform identity. The import also
 derives one all-version family per CPE part, vendor, and product. The family CPE uses
@@ -43,3 +43,8 @@ identities. Names alone never establish that an installed version is vulnerable.
 Once NVD has published configurations, later CNA updates preserve that applicability;
 an explicitly empty corrected NVD configuration removes current stale associations.
 Historical organization alerts remain available.
+
+The CVE baseline uses official yearly feeds from **2002 through the current year**.
+NVD's 2002 file also contains 1999–2001 records; there are no separate files to import
+for those years. See the [official feed format](https://nvd.nist.gov/vuln/data-feeds).
+Completion requires every published yearly feed, not nonexistent earlier files.

@@ -34,7 +34,7 @@ def main() -> None:
             if user is not None:
                 user.email = DEMO_EMAIL
         if user is None:
-            organization = Organization(name="Northstar IT Services")
+            organization = Organization(name="CVEATOR IT Services")
             session.add(organization)
             session.flush()
             user = User(

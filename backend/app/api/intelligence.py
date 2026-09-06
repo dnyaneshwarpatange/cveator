@@ -1,7 +1,8 @@
 """Read-only shared vulnerability intelligence, authenticated through the app."""
 
+import logging
 import re
-from threading import Lock
+from threading import Lock, Thread
 from time import monotonic
 from typing import Annotated
 
@@ -10,8 +11,10 @@ from sqlalchemy import column, exists, func, literal, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, defer
 
+from app.adapters.intelligence_counts_cache import read_counts, write_counts
 from app.api.dependencies import get_current_principal
-from app.db.session import get_session
+from app.core.time import utc_now
+from app.db.session import SessionLocal, get_session
 from app.domain.auth import Principal
 from app.domain.cve_history import aggregate_cve_sources
 from app.models.catalog import Product, WatchlistItem
@@ -24,25 +27,56 @@ PrincipalDependency = Annotated[Principal, Depends(get_current_principal)]
 SessionDependency = Annotated[Session, Depends(get_session)]
 _counts_lock = Lock()
 _counts_cache: tuple[float, dict] = (0, {})
+_counts_refreshing = False
 
 
 def _database_counts(session: Session) -> dict:
     # Counts are global/public data, never tenant data. Avoid multiple dashboards
     # scanning the million-entry dictionary concurrently during a cold import.
-    global _counts_cache
+    global _counts_cache, _counts_refreshing
     with _counts_lock:
         expires_at, counts = _counts_cache
-        if monotonic() < expires_at:
+        if not counts:
+            counts = read_counts()
+            if counts:
+                _counts_cache = (0, counts)
+        if counts:
+            if monotonic() >= expires_at and not _counts_refreshing:
+                _counts_refreshing = True
+                Thread(target=_refresh_counts, daemon=True).start()
             return counts
-        counts = {
-            "cves": session.scalar(select(func.count(Cve.id))
-                                   .where(~Cve.cve_id.like("CVE-DEMO%"))),
-            "products": session.scalar(select(func.count(Product.id))),
-            "product_families": session.scalar(select(func.count(Product.id))
-                                               .where(Product.is_family.is_(True))),
-        }
+        counts = _query_counts(session)
         _counts_cache = (monotonic() + 60, counts)
+        write_counts(counts)
         return counts
+
+
+def _query_counts(session: Session) -> dict:
+    return {
+        "cves": session.scalar(select(func.count(Cve.id))
+                               .where(~Cve.cve_id.like("CVE-DEMO%"))),
+        "products": session.scalar(select(func.count(Product.id))),
+        "product_families": session.scalar(select(func.count(Product.id))
+                                           .where(Product.is_family.is_(True))),
+        "counts_updated_at": utc_now().isoformat(),
+    }
+
+
+def _refresh_counts() -> None:
+    global _counts_cache, _counts_refreshing
+    try:
+        with SessionLocal() as session:
+            counts = _query_counts(session)
+        write_counts(counts)
+        with _counts_lock:
+            _counts_cache = (monotonic() + 60, counts)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Count refresh failed: %s", type(exc).__name__)
+        with _counts_lock:
+            _counts_cache = (monotonic() + 60, _counts_cache[1])
+    finally:
+        with _counts_lock:
+            _counts_refreshing = False
 
 
 @router.get("/status")

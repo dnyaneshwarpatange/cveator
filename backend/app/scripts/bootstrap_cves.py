@@ -26,19 +26,20 @@ def run_bootstrap(
 
     from sqlalchemy import select, text
 
-    from app.adapters.nvd_bulk import NvdYearlyFeed
+    from app.adapters.nvd_bulk import NVD_FIRST_FEED_YEAR, NvdYearlyFeed
     from app.core.time import utc_now
     from app.db.session import SessionLocal, engine
     from app.models.catalog_import import CatalogImport
     from app.services.cve_bulk import import_cve_batch
 
     current_year = utc_now().year
-    years = sorted(set(years if years is not None else range(1999, current_year + 1)), reverse=True)
-    if any(year < 1999 or year > current_year for year in years):
-        raise ValueError(f"years must be between 1999 and {current_year}")
+    years = sorted(set(years if years is not None else
+                       range(NVD_FIRST_FEED_YEAR, current_year + 1)), reverse=True)
+    if any(year < NVD_FIRST_FEED_YEAR or year > current_year for year in years):
+        raise ValueError(f"feed years must be between {NVD_FIRST_FEED_YEAR} and {current_year}")
     if not years:
         raise ValueError("At least one year is required")
-    required = {f"nvd_cves_{year}" for year in range(1999, current_year + 1)}
+    required = {f"nvd_cves_{year}" for year in range(NVD_FIRST_FEED_YEAR, current_year + 1)}
     with engine.connect() as lock_connection:
         if not lock_connection.scalar(text("SELECT pg_try_advisory_lock(830425030)")):
             print("Another full CVE baseline import is already running", flush=True)
@@ -47,6 +48,12 @@ def run_bootstrap(
         years_imported = 0
         try:
             with SessionLocal.begin() as session:
+                # Preserve obsolete failed checkpoints for audit, but do not
+                # request nonexistent files or treat them as missing coverage.
+                for year in range(1999, NVD_FIRST_FEED_YEAR):
+                    obsolete = session.get(CatalogImport, f"nvd_cves_{year}")
+                    if obsolete is not None:
+                        obsolete.status, obsolete.error = "superseded", None
                 completed_sources = set(
                     session.scalars(
                         select(CatalogImport.source).where(

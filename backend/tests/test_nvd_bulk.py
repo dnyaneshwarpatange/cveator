@@ -207,3 +207,9 @@ def test_bulk_merge_keeps_other_sources_and_enrichment() -> None:
 def test_callable_rejects_unbounded_batch_sizes_before_initializing_database() -> None:
     with pytest.raises(ValueError, match="batch-size"):
         run_bootstrap(batch_size=50000)
+
+
+@pytest.mark.parametrize("year", [1999, 2000, 2001])
+def test_nonexistent_early_year_feeds_are_not_requested(year: int) -> None:
+    with pytest.raises(ValueError, match="feed years"):
+        run_bootstrap(years=[year])

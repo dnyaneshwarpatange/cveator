@@ -15,6 +15,7 @@ from app.adapters.nvd import normalize_nvd_vulnerability
 from app.domain.cve import NormalizedCve
 
 NVD_FEED_BASE = "https://nvd.nist.gov/feeds/json/cve/2.0"
+NVD_FIRST_FEED_YEAR = 2002  # This file also contains all CVEs from earlier years.
 
 
 class InvalidNvdFeed(ValueError):
@@ -35,7 +36,7 @@ class NvdYearlyFeed:
     @contextmanager
     def records(self, year: int) -> Iterator[Iterator[NormalizedCve]]:
         """Download once, verify the uncompressed digest, then parse in bounded memory."""
-        if not 1999 <= year <= 2100:
+        if not NVD_FIRST_FEED_YEAR <= year <= 2100:
             raise ValueError("Unsupported NVD feed year")
         base = f"{NVD_FEED_BASE}/nvdcve-2.0-{year}"
         metadata_response = self._client.get(f"{base}.meta")

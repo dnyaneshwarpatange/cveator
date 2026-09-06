@@ -15,6 +15,7 @@ node_modules/
 .next/
 *.tsbuildinfo
 backend/.coverage
+backend/celerybeat-schedule*
 postgres-data/
 redis-data/
 infra/postfix/secrets/*
