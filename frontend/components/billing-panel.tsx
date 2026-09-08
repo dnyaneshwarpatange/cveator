@@ -30,8 +30,8 @@ export function BillingPanel({
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <h2 className="text-xl font-semibold text-slate-950">Billing</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          Online billing is not available for this workspace yet. You can continue reviewing
-          alerts and managing your software watchlist.
+          Online billing is not configured correctly yet. Contact the application administrator.
+          Monitoring requires a paid plan once your 3-day free trial ends.
         </p>
       </section>
     );
@@ -147,7 +147,7 @@ export function BillingPanel({
           {confirmCancel && <div className="mt-4 rounded-lg border border-rose-200 p-4" role="alert"><p className="text-sm">Cancel renewal at the end of this billing period?</p><div className="mt-3 flex gap-3"><button className="button" disabled={busy} type="button" onClick={() => setConfirmCancel(false)}>Keep my plan</button><button className="button" disabled={busy} type="button" onClick={() => void cancelSubscription()}>Confirm cancellation</button></div></div>}
         </div>
       ) : null}
-      {(!subscription || subscription.status === "cancelled") && canManage ? (
+      {(!subscription || ["cancelled", "created", "halted", "expired", "past_due"].includes(subscription.status)) && canManage ? (
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {initialPlans.map((plan) => (
             <article className="rounded-xl border border-slate-200 p-4" key={plan.id}>

@@ -17,6 +17,7 @@ from app.domain.payment import (
     PaymentEventType,
     PaymentProviderError,
     PaymentProviderPayloadInvalid,
+    PaymentProviderUnavailable,
     ProviderSubscription,
 )
 from app.providers.razorpay.config import RazorpaySettings
@@ -74,19 +75,22 @@ class RazorpayPaymentProvider:
             },
         )
         provider_subscription_id = _required_string(payload, "id")
-        key_id, _ = self._settings.require_api_credentials()
         return ProviderSubscription(
             provider_subscription_id=provider_subscription_id,
             status=_subscription_status(payload.get("status")),
             current_period_end=_unix_timestamp(payload.get("current_end")),
-            checkout_payload={
-                "provider": self.provider_name,
-                "script_url": self._settings.razorpay_checkout_script_url,
-                "key_id": key_id,
-                "provider_subscription_id": provider_subscription_id,
-                "display_name": "CVE Monitor",
-            },
+            checkout_payload=self.checkout_payload(provider_subscription_id),
         )
+
+    def checkout_payload(self, provider_subscription_id: str) -> dict[str, object]:
+        key_id, _ = self._settings.require_api_credentials()
+        return {
+            "provider": self.provider_name,
+            "script_url": self._settings.razorpay_checkout_script_url,
+            "key_id": key_id,
+            "provider_subscription_id": provider_subscription_id,
+            "display_name": "CVE Monitor",
+        }
 
     def verify_checkout_signature(self, callback: CheckoutCallback) -> bool:
         _, key_secret = self._settings.require_api_credentials()
@@ -163,6 +167,8 @@ class RazorpayPaymentProvider:
                     json=payload,
                     headers={"content-type": "application/json"},
                 )
+                if response.status_code == 401:
+                    raise PaymentProviderUnavailable("Payment credentials were rejected")
                 response.raise_for_status()
                 data = response.json()
         except (httpx.HTTPError, ValueError) as error:

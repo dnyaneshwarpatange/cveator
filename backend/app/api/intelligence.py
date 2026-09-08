@@ -21,6 +21,7 @@ from app.models.catalog import Product, WatchlistItem
 from app.models.catalog_import import CatalogImport
 from app.models.cve import Cve, CveChange, IngestionCursor
 from app.models.product_sync import ProductSync
+from app.services.access import is_application_admin
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
 PrincipalDependency = Annotated[Principal, Depends(get_current_principal)]
@@ -81,6 +82,8 @@ def _refresh_counts() -> None:
 
 @router.get("/status")
 def data_status(principal: PrincipalDependency, session: SessionDependency) -> dict:
+    if not is_application_admin(principal.user_id):
+        raise HTTPException(status_code=403, detail="Application administrator access required")
     imports = list(session.scalars(select(CatalogImport).order_by(CatalogImport.source)))
     catalog = next((item for item in imports if item.source == "nvd_cpe_dictionary"), None)
     sources = session.scalars(select(IngestionCursor).order_by(IngestionCursor.source))
@@ -172,11 +175,26 @@ def cve_detail(cve_id: str, principal: PrincipalDependency, session: SessionDepe
         select(CveChange).where(CveChange.cve_id == cve.id)
         .order_by(CveChange.observed_at.desc(), CveChange.id.desc()).limit(100)
     )
-    return {**_cve_item(cve), "sources": sorted(cve.source_json),
+    result = {**_cve_item(cve), "sources": sorted(cve.source_json),
             "normalized": cve.normalized_json or aggregate_cve_sources(cve.source_json),
             "history": [{"id": row.id, "source": row.source, "kind": row.kind,
                          "changes": row.changes, "observed_at": row.observed_at,
                          "source_modified_at": row.source_modified_at} for row in history]}
+    if not is_application_admin(principal.user_id):
+        result.pop("sources")
+        result["normalized"] = without_provenance(result["normalized"])
+        result["history"] = [without_provenance(event) for event in result["history"]]
+    return result
+
+
+def without_provenance(value):
+    """Remove internal origin metadata, including nested history diffs."""
+    if isinstance(value, dict):
+        return {key: without_provenance(item) for key, item in value.items()
+                if "source" not in key.lower() and key not in {"provider", "origin"}}
+    if isinstance(value, list):
+        return [without_provenance(item) for item in value]
+    return value
 
 
 def _cve_item(cve: Cve) -> dict:

@@ -1,8 +1,10 @@
 import hashlib
 import hmac
 import json
+from unittest.mock import MagicMock
 from uuid import uuid4
 
+import pytest
 from pydantic import SecretStr
 
 from app.domain.payment import (
@@ -11,9 +13,19 @@ from app.domain.payment import (
     CreateSubscriptionInput,
     PaymentCustomerInput,
     PaymentEventType,
+    PaymentProviderUnavailable,
 )
 from app.providers.razorpay.config import RazorpaySettings
 from app.providers.razorpay.razorpay_payment_provider import RazorpayPaymentProvider
+
+
+def test_rejected_credentials_return_configuration_error_not_internal_error(monkeypatch):
+    client = MagicMock()
+    client.__enter__.return_value.request.return_value.status_code = 401
+    monkeypatch.setattr("app.providers.razorpay.razorpay_payment_provider.httpx.Client",
+                        lambda **_: client)
+    with pytest.raises(PaymentProviderUnavailable):
+        RazorpayPaymentProvider(_settings())._send_request("POST", "/v1/customers", {})
 
 
 def test_creates_customer_and_subscription_with_gateway_metadata() -> None:

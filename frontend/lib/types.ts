@@ -7,6 +7,7 @@ export interface SessionUser {
   organization_id: string;
   email: string;
   role: OrganizationRole;
+  is_application_admin?: boolean;
 }
 
 export interface AuthResponse {
@@ -53,7 +54,7 @@ export interface VulnerabilityPage {
 }
 
 export interface VulnerabilityDetail extends Vulnerability {
-  sources: string[];
+  sources?: string[];
   normalized: Record<string, unknown>;
   history: { id: number; source: string; kind: string; changes: Record<string, { old: unknown; new: unknown }>; observed_at: string; source_modified_at: string | null }[];
 }

@@ -55,6 +55,21 @@ def require_roles(*roles: OrganizationRole) -> Callable[[Principal], Principal]:
     return role_dependency
 
 
+def require_monitoring_access(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[Session, Depends(get_session)],
+) -> Principal:
+    from app.services.access import monitoring_access
+
+    if not monitoring_access(session, principal.org_id)["has_access"]:
+        raise HTTPException(
+            status_code=402,
+            detail=("Your 3-day free trial has ended. Choose a paid plan in Plan & billing "
+                    "to continue software monitoring."),
+        )
+    return principal
+
+
 def _credentials_exception() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

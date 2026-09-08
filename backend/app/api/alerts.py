@@ -5,13 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_principal, require_roles
+from app.api.dependencies import get_current_principal, require_monitoring_access, require_roles
 from app.db.session import get_session
 from app.domain.alerts import AlertListItem, AlertStatus, DashboardOverview, Severity
 from app.domain.auth import OrganizationRole, Principal
 from app.repositories.sqlalchemy_alert_repository import SqlAlchemyTenantAlertRepository
 
-router = APIRouter(prefix="/alerts", tags=["alerts"])
+router = APIRouter(
+    prefix="/alerts", tags=["alerts"], dependencies=[Depends(require_monitoring_access)]
+)
 
 
 class AlertProductResponse(BaseModel):

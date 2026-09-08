@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_principal, require_roles
+from app.api.dependencies import get_current_principal, require_monitoring_access, require_roles
 from app.core.time import utc_now
 from app.db.session import get_session
 from app.domain.auth import OrganizationRole, Principal
@@ -37,7 +37,12 @@ def list_watchlist(
     return [_product_response(product) for product in repository.list_products()]
 
 
-@router.post("", response_model=WatchlistProductResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=WatchlistProductResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_monitoring_access)],
+)
 def add_watchlist_item(
     payload: AddWatchlistItemRequest,
     principal: Annotated[
@@ -58,12 +63,15 @@ def add_watchlist_item(
         if product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
         SqlAlchemyAlertRepository(session).create_missing_alerts(org_id=principal.org_id)
-        session.execute(insert(ProductSync).values(product_id=payload.product_id, status="pending")
-                        .on_conflict_do_update(
-                            index_elements=["product_id"],
-                            set_={"status": "pending", "error": None, "updated_at": utc_now()},
-                            where=ProductSync.status.in_(["cancelled", "failed"]),
-                        ))
+        session.execute(
+            insert(ProductSync)
+            .values(product_id=payload.product_id, status="pending")
+            .on_conflict_do_update(
+                index_elements=["product_id"],
+                set_={"status": "pending", "error": None, "updated_at": utc_now()},
+                where=ProductSync.status.in_(["cancelled", "failed"]),
+            )
+        )
         session.commit()
     except HTTPException:
         session.rollback()

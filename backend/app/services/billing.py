@@ -27,6 +27,15 @@ class BillingService:
         self, *, org_id, organization_name: str, email: str, plan_id: str
     ) -> tuple[StoredSubscription, dict[str, object]]:
         plan = self._plans.get(plan_id)
+        existing = self._repository.get_latest_subscription(org_id=org_id)
+        if existing and existing.status not in {"cancelled", "completed", "expired"}:
+            if (existing.status == "created" and existing.plan_id == plan.id
+                    and existing.payment_provider == self._provider.provider_name):
+                return existing, self._provider.checkout_payload(existing.provider_subscription_id)
+            raise PaymentProviderPayloadInvalid(
+                "A subscription already exists. Refresh its status or cancel it "
+                "before changing plans."
+            )
         customer = self._repository.get_customer(
             org_id=org_id, payment_provider=self._provider.provider_name
         )

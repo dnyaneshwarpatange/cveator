@@ -143,6 +143,20 @@ def test_starts_checkout_with_an_internal_plan_and_persists_generic_identifiers(
     assert checkout_payload == {"provider": "test-gateway"}
 
 
+def test_retry_resumes_existing_checkout_without_creating_another_subscription():
+    repository = FakeBillingRepository()
+    provider = FakePaymentProvider()
+    provider.checkout_payload = lambda subscription_id: {"resume": subscription_id}
+    service = BillingService(repository, provider, _plans())
+    org_id = uuid4()
+    arguments = dict(org_id=org_id, organization_name="Acme IT",
+                     email="owner@example.com", plan_id="starter_monthly")
+    first, _ = service.start_checkout(**arguments)
+    second, payload = service.start_checkout(**arguments)
+    assert first is second
+    assert payload == {"resume": first.provider_subscription_id}
+
+
 def test_webhook_duplicate_does_not_apply_a_second_state_change() -> None:
     repository = FakeBillingRepository()
     repository.claimed = False

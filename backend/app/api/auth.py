@@ -20,6 +20,7 @@ from app.domain.auth import (
     Principal,
 )
 from app.repositories.sqlalchemy_auth_repository import SqlAlchemyAuthRepository
+from app.services.access import is_application_admin
 from app.services.auth import AuthService
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -50,6 +51,7 @@ class AuthenticatedUserResponse(BaseModel):
     organization_id: str
     email: EmailStr
     role: str
+    is_application_admin: bool = False
 
 
 class TokenResponse(BaseModel):
@@ -122,6 +124,7 @@ def current_user(
         organization_id=str(principal.org_id),
         email=principal.email,
         role=principal.role.value,
+        is_application_admin=is_application_admin(principal.user_id),
     )
 
 
@@ -134,6 +137,7 @@ def _token_response(user: AuthenticatedUser, settings: Settings) -> TokenRespons
             organization_id=str(user.org_id),
             email=user.email,
             role=user.role.value,
+            is_application_admin=is_application_admin(user.id),
         ),
     )
 

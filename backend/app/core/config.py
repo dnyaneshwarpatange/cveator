@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     jwt_access_token_minutes: int = Field(default=30, ge=5, le=1_440)
 
     payment_provider: str = ""
+    application_admin_user_id: str = ""
     billing_plans_json: str = "{}"
 
     database_url: str = "postgresql+psycopg://cve_monitor:change-me@localhost:5432/cve_monitor"

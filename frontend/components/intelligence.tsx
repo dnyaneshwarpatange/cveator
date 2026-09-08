@@ -6,10 +6,11 @@ import { Icon } from "@/components/icon";
 import { requestJson } from "@/lib/api-client";
 import type { IntelligenceStatus, VulnerabilityPage } from "@/lib/types";
 
-export function useIntelligenceStatus(revision: number) {
+export function useIntelligenceStatus(revision: number, enabled = true) {
   const [data, setData] = useState<IntelligenceStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     let pending = false;
     async function load() {
@@ -25,7 +26,7 @@ export function useIntelligenceStatus(revision: number) {
     void load();
     const interval = setInterval(() => void load(), 20_000);
     return () => { controller.abort(); clearInterval(interval); };
-  }, [revision]);
+  }, [revision, enabled]);
   return { data, error };
 }
 

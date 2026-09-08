@@ -16,6 +16,7 @@ from app.domain.alerts import (
 )
 from app.models.catalog import Alert, CveProductMatch, Product, WatchlistItem
 from app.models.cve import Cve
+from app.services.access import monitoring_access_condition
 
 
 class SqlAlchemyAlertRepository:
@@ -38,7 +39,7 @@ class SqlAlchemyAlertRepository:
                 literal(AlertStatus.NEW.value),
             )
             .join(CveProductMatch, CveProductMatch.product_id == WatchlistItem.product_id)
-            .where(missing_alert)
+            .where(missing_alert, monitoring_access_condition(WatchlistItem.org_id))
             .distinct()
         )
         if org_id is not None:

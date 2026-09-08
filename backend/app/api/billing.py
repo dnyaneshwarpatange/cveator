@@ -28,6 +28,15 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 _billing_managers = require_roles(OrganizationRole.OWNER, OrganizationRole.ADMIN)
 
 
+@router.get("/access")
+def current_access(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[Session, Depends(get_session)],
+) -> dict:
+    from app.services.access import monitoring_access
+    return monitoring_access(session, principal.org_id)
+
+
 class BillingPlanResponse(BaseModel):
     id: str
     name: str
@@ -282,5 +291,6 @@ def _subscription_response(subscription: StoredSubscription) -> SubscriptionResp
 def _service_unavailable() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Billing is not configured",
+        detail=("Billing is unavailable. The application administrator must check "
+                "the payment credentials and plan configuration."),
     )

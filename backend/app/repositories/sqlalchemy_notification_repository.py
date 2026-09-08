@@ -18,6 +18,7 @@ from app.models.catalog import (
 )
 from app.models.cve import Cve
 from app.repositories.sqlalchemy_alert_repository import current_watchlist_match
+from app.services.access import monitoring_access_condition
 
 
 class SqlAlchemyNotificationRepository:
@@ -59,7 +60,7 @@ class SqlAlchemyNotificationRepository:
             select(Alert, Cve, Organization)
             .join(Cve, Cve.id == Alert.cve_id)
             .join(Organization, Organization.id == Alert.org_id)
-            .where(*conditions)
+            .where(*conditions, monitoring_access_condition(Alert.org_id))
             .order_by(Cve.is_kev.desc(), Cve.cvss_score.desc().nullslast(), Alert.created_at)
             .limit(limit)
             .with_for_update(of=Alert, skip_locked=True)
