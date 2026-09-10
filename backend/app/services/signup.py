@@ -72,7 +72,7 @@ class SignupService:
             self.sender.send(
                 OutboundEmail(
                     recipient=email,
-                    subject="Verify your CVE Monitor email",
+                    subject="Verify your cveator email",
                     text_body=f"Your signup verification code is {code}. It expires in 10 minutes. "
                     "Do not share this code. If you did not request it, ignore this email.",
                     html_body=f"<p>Your signup verification code:</p><p><strong>{code}</strong></p>"

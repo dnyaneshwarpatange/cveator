@@ -58,7 +58,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   return (
     <main className="auth-shell">
       <aside className="auth-story">
-        <Link href="/" className="brand"><span className="brand-mark"><Icon name="shield" size={25} /></span><span>CVE Monitor<small>STAY ONE STEP AHEAD</small></span></Link>
+        <Link href="/" className="brand"><span className="brand-mark"><Icon name="shield" size={25} /></span><span>cveator<small>STAY ONE STEP AHEAD</small></span></Link>
         <div className="auth-story-content"><span className="eyebrow">LESS NOISE. MORE CERTAINTY.</span><h2>Know what matters.<br /><em>Act with confidence.</em></h2><p>Security visibility for the software your business depends on. Clear priorities. Practical next steps.</p><div className="auth-features"><span><Icon name="check" size={18} /> Watch the products your team actually uses</span><span><Icon name="check" size={18} /> See actively exploited risks first</span><span><Icon name="check" size={18} /> Turn vulnerability data into a clear action</span></div></div>
         <p className="auth-story-footer">Built for small businesses and the teams who support them.</p>
       </aside>
@@ -175,7 +175,7 @@ function SignupVerification({challengeId, registration, onBack}: {
     finally { setBusy(false); }
   }
   return <main className="auth-form-side min-h-screen"><section className="auth-card">
-    <Link className="brand" href="/">CVE Monitor</Link>
+    <Link className="brand" href="/">cveator</Link>
     <h1 className="mt-6 text-2xl font-semibold">Verify your email</h1>
     <p className="mt-3">Enter the six-digit code sent to <strong>{registration.email}</strong>.</p>
     <p className="mt-3 text-sm" role="status">{notice}</p>

@@ -89,7 +89,7 @@ class RazorpayPaymentProvider:
             "script_url": self._settings.razorpay_checkout_script_url,
             "key_id": key_id,
             "provider_subscription_id": provider_subscription_id,
-            "display_name": "CVE Monitor",
+            "display_name": "cveator",
         }
 
     def verify_checkout_signature(self, callback: CheckoutCallback) -> bool:

@@ -31,7 +31,7 @@ export async function launchCheckout(
   const checkout = new window.Razorpay({
     key,
     subscription_id: subscriptionId,
-    name: optionalText(payload, "display_name") ?? "CVE Monitor",
+    name: optionalText(payload, "display_name") ?? "cveator",
     handler(response) {
       onSuccess({
         provider_subscription_id: response.razorpay_subscription_id,

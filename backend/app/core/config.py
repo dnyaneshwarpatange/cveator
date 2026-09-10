@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     email_delivery_enabled: bool = False
     email_from_address: str = ""
-    email_from_name: str = "CVE Monitor"
+    email_from_name: str = "cveator"
     public_app_url: str = "http://localhost:3000"
     smtp_host: str = ""
     smtp_port: int = Field(default=25, ge=1, le=65_535)

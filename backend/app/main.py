@@ -31,7 +31,7 @@ async def lifespan(_: FastAPI):
 settings = get_settings()
 configure_logging(settings)
 app = FastAPI(
-    title="CVE Monitor API",
+    title="cveator API",
     version="0.1.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.api_docs_enabled else None,

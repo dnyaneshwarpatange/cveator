@@ -1,4 +1,4 @@
-# CVE Monitor
+# cveator
 
 A self-hosted vulnerability workspace for small businesses. The responsive dashboard includes a prioritized alert inbox, software search and watchlist, plain-language next steps, and role-aware billing. Email, payment credentials, production DNS, and recovery checks must be configured before customer launch.
 

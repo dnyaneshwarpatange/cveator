@@ -1,1 +1,1 @@
-"""CVE Monitor application package."""
+"""cveator application package."""

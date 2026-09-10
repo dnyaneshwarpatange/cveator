@@ -21,13 +21,13 @@ def main() -> None:
     SmtpEmailSender(SmtpConfiguration.from_settings(settings)).send(
         OutboundEmail(
             recipient=recipient,
-            subject="CVE Monitor local email test",
+            subject="cveator local email test",
             text_body=(
-                "Your local CVE Monitor SMTP configuration is working. "
+                "Your local cveator SMTP configuration is working. "
                 "No vulnerability alert was triggered by this test."
             ),
             html_body=(
-                "<p>Your local <strong>CVE Monitor</strong> SMTP configuration is working.</p>"
+                "<p>Your local <strong>cveator</strong> SMTP configuration is working.</p>"
                 "<p>No vulnerability alert was triggered by this test.</p>"
             ),
         )
