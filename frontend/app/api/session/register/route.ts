@@ -1,32 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { backendRequest } from "@/lib/backend";
+import { proxyBackendResponse } from "@/lib/backend-response";
 
-import { backendRequest, sessionCookieName, sessionCookieSecure } from "@/lib/backend";
-import type { AuthResponse } from "@/lib/types";
-
-export async function POST(request: NextRequest): Promise<NextResponse> {
-  const response = await backendRequest("/auth/register", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
+export async function POST(request: NextRequest) {
+  return proxyBackendResponse(await backendRequest("/auth/register", {
+    method: "POST", headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(60000),
     body: await request.text()
-  });
-  const payload = await response.json().catch(() => ({ detail: "Unexpected API response" }));
-  if (!response.ok) {
-    return NextResponse.json(payload, { status: response.status });
-  }
-
-  const authenticated = payload as AuthResponse;
-  const result = NextResponse.json({
-    expires_in_seconds: authenticated.expires_in_seconds,
-    user: authenticated.user
-  });
-  result.cookies.set({
-    name: sessionCookieName,
-    value: authenticated.access_token,
-    httpOnly: true,
-    secure: sessionCookieSecure,
-    sameSite: "lax",
-    maxAge: authenticated.expires_in_seconds,
-    path: "/"
-  });
-  return result;
+  }));
 }

@@ -8,12 +8,15 @@ celery_app = Celery(
     "cve_monitor",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks"],
+    include=["app.tasks", "app.signup_tasks"],
 )
 celery_app.conf.update(
     timezone="UTC",
     task_track_started=True,
     beat_schedule={
+        "purge-unverified-signups": {
+            "task": "app.signup_tasks.purge_pending_signups", "schedule": 3600,
+        },
         "sync-subscribed-product-history": {
             "task": "app.tasks.sync_watchlist_products", "schedule": 60,
         },

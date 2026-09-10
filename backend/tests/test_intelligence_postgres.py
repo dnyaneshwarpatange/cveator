@@ -23,8 +23,9 @@ def postgres_session():
     url = os.environ.get("TEST_DATABASE_URL")
     if not url:
         pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
-    engine = create_engine(url, connect_args={"connect_timeout": 10,
-                                             "options": "-c statement_timeout=30000"})
+    engine = create_engine(
+        url, connect_args={"connect_timeout": 10, "options": "-c statement_timeout=30000"}
+    )
     with engine.connect() as connection:
         transaction = connection.begin()
         with Session(bind=connection) as session:
@@ -154,3 +155,58 @@ def test_trial_and_paid_access_use_real_tenant_scoped_queries(postgres_session):
     subscription.current_period_end = now - timedelta(seconds=1)
     postgres_session.flush()
     assert not postgres_session.scalar(select(monitoring_access_condition(expired.id)))
+
+
+def test_signup_verification_is_atomic_and_cannot_be_replayed(postgres_session, monkeypatch):
+    import re
+    from unittest.mock import Mock
+
+    from fastapi import HTTPException
+
+    from app.api import auth
+    from app.models.catalog import User
+    from app.models.signup import PendingSignup
+    from app.repositories.sqlalchemy_auth_repository import SqlAlchemyAuthRepository
+    from app.services.auth import AuthService
+    from app.services.signup import SignupService
+
+    sender = Mock()
+    service = SignupService(postgres_session, sender, "test-only-key")
+    monkeypatch.setattr(auth, "_signup_service", lambda _: service)
+    monkeypatch.setattr(auth, "_enforce_signup_ip_limit", lambda *_, **__: None)
+    email = f"otp-{uuid4().hex}@example.com"
+    challenge = auth.register_owner(
+        auth.RegisterRequest(
+            organization_name="Rollback OTP test", email=email, password="Strong-test-password!"
+        ),
+        Mock(),
+        postgres_session,
+    )
+    assert not hasattr(challenge, "access_token")
+    assert postgres_session.scalar(select(User).where(User.email == email)) is None
+    code = re.search(r"\b[0-9]{6}\b", sender.send.call_args.args[0].text_body).group()
+    wrong = "000000" if code != "000000" else "111111"
+    with pytest.raises(HTTPException):
+        auth.verify_signup(
+            auth.VerifySignupRequest(challenge_id=challenge.challenge_id, code=wrong),
+            Mock(),
+            postgres_session,
+        )
+    assert postgres_session.get(PendingSignup, challenge.challenge_id).attempts == 1
+    verified = auth.verify_signup(
+        auth.VerifySignupRequest(challenge_id=challenge.challenge_id, code=code),
+        Mock(),
+        postgres_session,
+    )
+    assert verified.access_token
+    assert postgres_session.get(PendingSignup, challenge.challenge_id) is None
+    user = AuthService(SqlAlchemyAuthRepository(postgres_session)).authenticate(
+        email=email, password="Strong-test-password!"
+    )
+    assert monitoring_access(postgres_session, user.org_id)["status"] == "trial"
+    with pytest.raises(HTTPException):
+        auth.verify_signup(
+            auth.VerifySignupRequest(challenge_id=challenge.challenge_id, code=code),
+            Mock(),
+            postgres_session,
+        )

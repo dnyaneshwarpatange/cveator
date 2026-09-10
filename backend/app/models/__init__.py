@@ -3,6 +3,7 @@ from app.models.catalog import Alert, CveProductMatch, Organization, Product, Us
 from app.models.catalog_import import CatalogImport
 from app.models.cve import Cve, CveChange, IngestionCursor
 from app.models.product_sync import ProductSync
+from app.models.signup import PendingSignup
 
 __all__ = [
     "Alert",
@@ -13,6 +14,7 @@ __all__ = [
     "Customer",
     "IngestionCursor",
     "Organization",
+    "PendingSignup",
     "Product",
     "ProductSync",
     "Subscription",

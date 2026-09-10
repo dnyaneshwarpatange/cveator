@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Icon } from "@/components/icon";
 import { requestJson } from "@/lib/api-client";
 
@@ -18,6 +18,8 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const isRegister = mode === "register";
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [registration, setRegistration] = useState<{email: string; password: string; organization_name?: string} | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -30,11 +32,17 @@ export function AuthForm({ mode }: AuthFormProps) {
       ...(isRegister ? { organization_name: String(form.get("organization_name") ?? "") } : {})
     };
     try {
-      await requestJson(`/api/session/${mode}`, {
+      const response = await requestJson<{challenge_id?: string}>(`/api/session/${mode}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload)
       });
+      if (isRegister) {
+        if (!response.challenge_id) throw new Error("Verification could not be started.");
+        setRegistration(payload);
+        setChallenge(response.challenge_id);
+        return;
+      }
       router.replace("/dashboard");
       router.refresh();
     } catch (reason) {
@@ -43,6 +51,9 @@ export function AuthForm({ mode }: AuthFormProps) {
       setSubmitting(false);
     }
   }
+
+  if (challenge && registration) return <SignupVerification challengeId={challenge}
+    registration={registration} onBack={() => { setChallenge(null); setRegistration(null); }} />;
 
   return (
     <main className="auth-shell">
@@ -111,7 +122,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             disabled={submitting}
             type="submit"
           >
-            {submitting ? "Please wait…" : isRegister ? "Create workspace" : "Sign in"}
+            {submitting ? "Please wait…" : isRegister ? "Send verification code" : "Sign in"}
             <Icon name="arrow" size={16} />
           </button>
         </form>
@@ -125,4 +136,65 @@ export function AuthForm({ mode }: AuthFormProps) {
       </section></div>
     </main>
   );
+}
+
+function SignupVerification({challengeId, registration, onBack}: {
+  challengeId: string;
+  registration: {email: string; password: string; organization_name?: string};
+  onBack: () => void;
+}) {
+  const router = useRouter();
+  const [id, setId] = useState(challengeId);
+  const [code, setCode] = useState("");
+  const [wait, setWait] = useState(60);
+  const [expires, setExpires] = useState(600);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState("Check your inbox and spam folder for your verification code.");
+  useEffect(() => {
+    const timer = setInterval(() => { setWait(v => Math.max(0, v - 1)); setExpires(v => Math.max(0, v - 1)); }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+  async function verify(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError(null);
+    try {
+      await requestJson("/api/session/register/verify", {method: "POST",
+        headers: {"content-type": "application/json"}, body: JSON.stringify({challenge_id: id, code})});
+      router.replace("/dashboard"); router.refresh();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Verification failed."); }
+    finally { setBusy(false); }
+  }
+  async function resend() {
+    setBusy(true); setError(null);
+    try {
+      const result = await requestJson<{challenge_id: string}>("/api/session/register", {
+        method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(registration)});
+      setId(result.challenge_id); setCode(""); setWait(60); setExpires(600);
+      setNotice("A new code was sent. Only the newest code will work.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "We could not resend the code."); }
+    finally { setBusy(false); }
+  }
+  return <main className="auth-form-side min-h-screen"><section className="auth-card">
+    <Link className="brand" href="/">CVE Monitor</Link>
+    <h1 className="mt-6 text-2xl font-semibold">Verify your email</h1>
+    <p className="mt-3">Enter the six-digit code sent to <strong>{registration.email}</strong>.</p>
+    <p className="mt-3 text-sm" role="status">{notice}</p>
+    <form onSubmit={verify} aria-busy={busy}>
+      <label htmlFor="signup-code">Verification code</label>
+      <input id="signup-code" name="code" inputMode="numeric" autoComplete="one-time-code"
+        pattern="[0-9]{6}" minLength={6} maxLength={6} required value={code}
+        onChange={e => setCode(e.target.value.replace(/[^0-9]/g, ""))}
+        className="mt-2 w-full rounded-lg border border-slate-300 p-3 text-xl tracking-widest" />
+      <p className="text-sm">{expires ? `Code expires in ${Math.ceil(expires / 60)} minutes.` : "Code expired. Request a new code."}</p>
+      {error && <p className="message message-error" role="alert">{error}</p>}
+      <button className="button button-primary" disabled={busy || code.length !== 6 || !expires} type="submit">
+        {busy ? "Please wait…" : "Verify and create workspace"}
+      </button>
+    </form>
+    <button className="text-button mt-4" type="button" disabled={busy || wait > 0} onClick={() => void resend()}>
+      {wait ? `Resend code in ${wait}s` : "Resend code"}
+    </button>
+    <button className="text-button mt-4" type="button" disabled={busy} onClick={onBack}>Use a different email</button>
+    <p className="mt-5 text-sm">Your three-day free trial starts after verification.</p>
+  </section></main>;
 }
