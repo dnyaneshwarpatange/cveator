@@ -4,7 +4,7 @@ import logging
 import re
 from threading import Lock, Thread
 from time import monotonic
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import column, exists, func, literal, select
@@ -125,6 +125,8 @@ def browse_cves(
     min_epss: Annotated[float | None, Query(ge=0, le=1)] = None,
     page: Annotated[int, Query(ge=1, le=10000)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+    sort_by: Literal["last_modified_at", "published_at", "cvss_score", "epss_score", "cve_id"] = "last_modified_at",
+    sort_order: Literal["asc", "desc"] = "desc",
 ) -> dict:
     filters = [~Cve.cve_id.like("CVE-DEMO%")]
     if q.strip():
@@ -159,8 +161,12 @@ def browse_cves(
         filters.append(Cve.epss_score >= min_epss)
     total = (_database_counts(session)["cves"] if len(filters) == 1 else
              session.scalar(select(func.count(Cve.id)).where(*filters))) or 0
+    sort_column = {"last_modified_at": Cve.last_modified_at, "published_at": Cve.published_at,
+                   "cvss_score": Cve.cvss_score, "epss_score": Cve.epss_score,
+                   "cve_id": Cve.cve_id}[sort_by]
+    ordering = sort_column.asc() if sort_order == "asc" else sort_column.desc()
     rows = session.scalars(select(Cve).options(defer(Cve.source_json)).where(*filters)
-                           .order_by(Cve.last_modified_at.desc().nullslast(), Cve.id.desc())
+                           .order_by(ordering.nullslast(), Cve.id.desc())
                            .offset((page - 1) * page_size).limit(page_size))
     return {"items": [_cve_item(row) for row in rows], "total": total,
             "page": page, "page_size": page_size}

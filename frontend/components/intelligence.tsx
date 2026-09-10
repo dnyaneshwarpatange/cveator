@@ -51,6 +51,8 @@ export function DataStatus({ data, error }: { data: IntelligenceStatus | null; e
 export function VulnerabilityExplorer({ revision }: { revision: number }) {
   const [filters, setFilters] = useState({ q: "", vendor: "", product: "", kev: false, min_cvss: "", min_epss: "" });
   const [query, setQuery] = useState("");
+  const [sortBy, setSortBy] = useState("last_modified_at");
+  const [sortOrder, setSortOrder] = useState("desc");
   const [searchRevision, setSearchRevision] = useState(0);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<VulnerabilityPage | null>(null);
@@ -58,12 +60,12 @@ export function VulnerabilityExplorer({ revision }: { revision: number }) {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    requestJson<VulnerabilityPage>(`/api/intelligence/cves?${query}&page=${page}&page_size=20`, { signal: controller.signal })
+    requestJson<VulnerabilityPage>(`/api/intelligence/cves?${query}&page=${page}&page_size=20&sort_by=${sortBy}&sort_order=${sortOrder}`, { signal: controller.signal })
       .then((result) => { if (!controller.signal.aborted) { setData(result); setError(null); } })
       .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Vulnerabilities could not be loaded."); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [page, query, revision, searchRevision]);
+  }, [page, query, revision, searchRevision, sortBy, sortOrder]);
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const params = new URLSearchParams();
@@ -73,7 +75,7 @@ export function VulnerabilityExplorer({ revision }: { revision: number }) {
     setLoading(true); setPage(1); setQuery(params.toString()); setSearchRevision((value) => value + 1);
   }
   return <section className="panel intelligence-panel" aria-labelledby="intelligence-heading">
-    <div className="panel-heading"><div><h2 id="intelligence-heading">Vulnerability database <span className="count-pill">{data?.total.toLocaleString() ?? "—"}</span></h2><p>Browse every imported CVE, including products outside your watchlist. Newest source updates first.</p></div></div>
+    <div className="panel-heading"><div><h2 id="intelligence-heading">Vulnerability database <span className="count-pill">{data?.total.toLocaleString() ?? "—"}</span></h2><p>Search and sort all matching vulnerabilities, including products outside your watchlist.</p></div></div>
     <form className="intelligence-filters" onSubmit={submit}>
       <label className="intelligence-search">CVE ID or description<input value={filters.q} onChange={(event) => setFilters({ ...filters, q: event.target.value })} placeholder="e.g. CVE-2024-3094 or authentication" maxLength={120} /></label>
       <label>Vendor<input value={filters.vendor} onChange={(event) => setFilters({ ...filters, vendor: event.target.value })} placeholder="e.g. atlassian" maxLength={100} /></label>
@@ -82,6 +84,16 @@ export function VulnerabilityExplorer({ revision }: { revision: number }) {
       <label>Minimum EPSS<select value={filters.min_epss} onChange={(event) => setFilters({ ...filters, min_epss: event.target.value })}><option value="">Any likelihood</option><option value="10">10%</option><option value="50">50%</option><option value="90">90%</option></select></label>
       <div className="intelligence-filter-actions"><label className="checkbox-label"><input type="checkbox" checked={filters.kev} onChange={(event) => setFilters({ ...filters, kev: event.target.checked })} />Known exploited only</label><button className="button button-primary" type="submit"><Icon name="search" size={16} />Search CVEs</button></div>
     </form>
+    <div className="intelligence-filters" aria-label="Search result sorting">
+      <label>Sort results by<select value={sortBy} onChange={(event) => { setLoading(true); setPage(1); setSortBy(event.target.value); }}>
+        <option value="last_modified_at">Last updated</option><option value="published_at">Published date</option>
+        <option value="cvss_score">Severity (CVSS)</option><option value="epss_score">Exploit likelihood (EPSS)</option><option value="cve_id">CVE ID (alphabetical)</option>
+      </select></label>
+      <label>Order<select value={sortOrder} onChange={(event) => { setLoading(true); setPage(1); setSortOrder(event.target.value); }}>
+        <option value="desc">Descending (newest / highest / Z–A)</option><option value="asc">Ascending (oldest / lowest / A–Z)</option>
+      </select></label>
+      <p className="muted">Applies to all search results. Missing values appear last.</p>
+    </div>
     {error && <div className="message message-error" role="alert">{error}</div>}
     <div aria-busy={loading}>{loading ? <div className="loading-state" role="status"><span className="loader" />Loading vulnerabilities…</div> : data?.items.length ? data.items.map((cve) => <article key={cve.cve_id} className="vulnerability-row"><div className="vulnerability-row-top"><Link href={`/dashboard/cves/${encodeURIComponent(cve.cve_id)}`} className="cve-link">{cve.cve_id}</Link><RiskBadges score={cve.cvss_score} kev={cve.is_kev} /><span className="alert-date">Updated {formatTimestamp(cve.last_modified_at, true)}</span></div><p className="vulnerability-description">{cve.description || "The source has not provided a description."}</p><div className="vulnerability-row-bottom"><div className="affected-products">{cve.products.slice(0, 5).map((product) => <span key={product}>{product.replaceAll("_", " ")}</span>)}{cve.products.length > 5 && <span>+{cve.products.length - 5} more</span>}</div><span>EPSS {cve.epss_score === null ? "unavailable" : `${(cve.epss_score * 100).toFixed(2)}%`}</span></div></article>) : <div className="empty-state"><Icon name="search" size={28} /><h3>No imported CVEs match these filters</h3><p>Try a broader query. Check the data coverage panel above if a product is still importing.</p></div>}</div>
     {!!data?.total && <footer className="pagination"><span>{((page - 1) * 20 + 1).toLocaleString()}–{Math.min(page * 20, data.total).toLocaleString()} of {data.total.toLocaleString()} vulnerabilities</span><div><button type="button" className="button button-small" disabled={loading || page === 1} onClick={() => { setLoading(true); setPage(page - 1); }}>Previous</button><span>Page {page}</span><button type="button" className="button button-small" disabled={loading || page * 20 >= data.total} onClick={() => { setLoading(true); setPage(page + 1); }}>Next</button></div></footer>}
