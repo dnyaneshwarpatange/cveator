@@ -17,6 +17,7 @@ from app.core.time import utc_now
 from app.db.session import SessionLocal, get_session
 from app.domain.auth import Principal
 from app.domain.cve_history import aggregate_cve_sources
+from app.domain.vulnerability_decision import decision_evidence
 from app.models.catalog import Product, WatchlistItem
 from app.models.catalog_import import CatalogImport
 from app.models.cve import Cve, CveChange, IngestionCursor
@@ -181,8 +182,12 @@ def cve_detail(cve_id: str, principal: PrincipalDependency, session: SessionDepe
         select(CveChange).where(CveChange.cve_id == cve.id)
         .order_by(CveChange.observed_at.desc(), CveChange.id.desc()).limit(100)
     )
-    result = {**_cve_item(cve), "sources": sorted(cve.source_json),
-            "normalized": cve.normalized_json or aggregate_cve_sources(cve.source_json),
+    # Detail views use the latest stored raw records, including fields added after
+    # the original normalized projection. No network fetch or full re-import needed.
+    normalized = aggregate_cve_sources(cve.source_json) if cve.source_json else cve.normalized_json
+    result = {**_cve_item(cve, normalized), "sources": sorted(cve.source_json),
+            "normalized": normalized,
+            "decision_evidence": decision_evidence(cve.source_json),
             "history": [{"id": row.id, "source": row.source, "kind": row.kind,
                          "changes": row.changes, "observed_at": row.observed_at,
                          "source_modified_at": row.source_modified_at} for row in history]}
@@ -203,8 +208,9 @@ def without_provenance(value):
     return value
 
 
-def _cve_item(cve: Cve) -> dict:
-    normalized = cve.normalized_json or aggregate_cve_sources(cve.source_json)
+def _cve_item(cve: Cve, normalized: dict | None = None) -> dict:
+    if normalized is None:
+        normalized = cve.normalized_json or aggregate_cve_sources(cve.source_json)
     products = normalized.get("products", [])
     return {
         "cve_id": cve.cve_id, "description": normalized.get("description") or "",

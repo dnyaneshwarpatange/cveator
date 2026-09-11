@@ -54,9 +54,14 @@ export interface VulnerabilityPage {
 }
 
 export interface VulnerabilityDetail extends Vulnerability {
+  decision_evidence?: {
+    epss_date?: string | null;
+    solutions: string[]; workarounds: string[]; exploits: string[];
+    exploitation: {listed_at: string | null; catalog_due_date: string | null; required_action: string | null; ransomware_use: string | null};
+  };
   sources?: string[];
   normalized: Record<string, unknown>;
-  history: { id: number; source: string; kind: string; changes: Record<string, { old: unknown; new: unknown }>; observed_at: string; source_modified_at: string | null }[];
+  history: { id: number; source?: string; kind: string; changes: Record<string, { old: unknown; new: unknown }>; observed_at: string; source_modified_at?: string | null }[];
 }
 
 export interface Alert {

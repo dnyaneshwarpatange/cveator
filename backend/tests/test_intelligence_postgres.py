@@ -25,13 +25,64 @@ def postgres_session():
         pytest.skip("TEST_DATABASE_URL is required for PostgreSQL integration tests")
     engine = create_engine(
         url, connect_args={"connect_timeout": 10, "options": "-c statement_timeout=30000"}
-    )
+      )
     with engine.connect() as connection:
         transaction = connection.begin()
         with Session(bind=connection) as session:
             yield session
         transaction.rollback()
     engine.dispose()
+
+
+def test_account_deletion_real_redis_and_postgres(postgres_session, monkeypatch):
+    import re
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from redis import Redis
+    from app.services.account_deletion import AccountDeletion
+    from app.models.catalog import User
+    from fastapi import HTTPException
+
+    redis = Redis.from_url(os.environ.get("TEST_REDIS_URL", "redis://127.0.0.1:6379/0"))
+    org = Organization(name="Deletion rollback test")
+    postgres_session.add(org)
+    postgres_session.flush()
+    user = User(org_id=org.id, email=f"{uuid4()}@example.com", password_hash="unusable", role="member")
+    postgres_session.add(user)
+    postgres_session.flush()
+    principal = SimpleNamespace(user_id=user.id, org_id=org.id, token_version=0)
+    sender = Mock()
+    service = AccountDeletion(postgres_session, redis, sender, "integration-only-secret")
+    monkeypatch.setattr("app.services.account_deletion.is_application_admin", lambda _: False)
+    key = f"account-delete:{user.id}"
+    try:
+        challenge = service.start(principal)["challenge_id"]
+        code = re.search(r"code is (\d{6})", sender.send.call_args.args[0].text_body).group(1)
+        wrong = "111111" if code != "111111" else "222222"
+        with pytest.raises(HTTPException):
+            service.confirm(principal, challenge, wrong)
+        assert postgres_session.get(User, user.id) is user
+        assert redis.get(key + ":attempts") == b"1"
+        # Expiry and exhausted budgets both reject even a correct code.
+        redis.delete(key)
+        with pytest.raises(HTTPException):
+            service.confirm(principal, challenge, code)
+        redis.set(key, service.digest(user, challenge, code), ex=600)
+        redis.set(key + ":attempts", 5, ex=3600)
+        with pytest.raises(HTTPException):
+            service.confirm(principal, challenge, code)
+        redis.set(key + ":attempts", 1, ex=3600)
+        service.confirm(principal, challenge, code)
+        postgres_session.flush()
+        assert postgres_session.get(User, principal.user_id) is None
+        assert postgres_session.get(Organization, org.id) is org
+        assert redis.get(key) is None
+        with pytest.raises(HTTPException):
+            service.confirm(principal, challenge, code)
+    finally:
+        # Only this disposable UUID's keys are touched; never flush Redis.
+        redis.delete(key, key + ":attempts", key + ":sends", key + ":cooldown")
+        redis.close()
 
 
 def test_vendor_and_product_must_belong_to_same_identity(postgres_session):
@@ -193,6 +244,19 @@ def test_signup_verification_is_atomic_and_cannot_be_replayed(postgres_session, 
             postgres_session,
         )
     assert postgres_session.get(PendingSignup, challenge.challenge_id).attempts == 1
+    original_id = challenge.challenge_id
+    pending = postgres_session.get(PendingSignup, original_id)
+    original_hash = pending.password_hash
+    pending.sent_at -= timedelta(seconds=61)
+    postgres_session.commit()
+    challenge = auth.resend_signup(auth.ResendSignupRequest(challenge_id=original_id), Mock(), postgres_session)
+    assert challenge.challenge_id != original_id
+    assert postgres_session.get(PendingSignup, challenge.challenge_id).password_hash == original_hash
+    assert postgres_session.get(PendingSignup, challenge.challenge_id).attempts == 1
+    assert postgres_session.get(PendingSignup, challenge.challenge_id).sends == 2
+    with pytest.raises(HTTPException):
+        auth.verify_signup(auth.VerifySignupRequest(challenge_id=original_id, code=code), Mock(), postgres_session)
+    code = re.search(r"\b[0-9]{6}\b", sender.send.call_args.args[0].text_body).group()
     verified = auth.verify_signup(
         auth.VerifySignupRequest(challenge_id=challenge.challenge_id, code=code),
         Mock(),

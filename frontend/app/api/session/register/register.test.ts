@@ -13,6 +13,14 @@ const request = () => new NextRequest("http://localhost/api/session/register", {
 });
 beforeEach(() => vi.clearAllMocks());
 
+it("returns actionable JSON when SMTP request times out upstream", async () => {
+  vi.mocked(backendRequest).mockRejectedValue(new Error("timeout"));
+  const response = await start(request());
+  expect(response.status).toBe(503);
+  expect((await response.json()).detail).toContain("newest code");
+  expect(response.headers.get("set-cookie")).toBeNull();
+});
+
 it("sending a signup code never sets a session cookie", async () => {
   vi.mocked(backendRequest).mockResolvedValue(Response.json({challenge_id: "test-id"}, {status: 202}));
   const response = await start(request());

@@ -16,12 +16,13 @@ export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 
-export async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+export async function requestJson<T>(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+  const { timeoutMs = 15000, ...requestInit } = init;
   let response: Response;
   try {
-    const timeout = AbortSignal.timeout(15000);
+    const timeout = AbortSignal.timeout(timeoutMs);
     const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-    response = await fetch(url, { cache: "no-store", ...init, signal });
+    response = await fetch(url, { cache: "no-store", ...requestInit, signal });
   } catch (error) {
     if (init.signal?.aborted) throw error;
     throw new ApiError("We couldn’t reach the service. Check your connection and try again.", 0);

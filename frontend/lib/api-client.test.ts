@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiErrorMessage, ApiError, requestJson } from "./api-client";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("user-facing request failures", () => {
+  it("allows OTP sends to outlast the server timeout without leaking options to fetch", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({challenge_id: "test"}));
+    vi.stubGlobal("fetch", fetchMock);
+    await requestJson("/api/session/register", {method: "POST", timeoutMs: 75000});
+    expect(timeout).toHaveBeenCalledWith(75000);
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("timeoutMs");
+  });
   it("formats FastAPI validation arrays as text instead of rendering objects", () => {
     expect(apiErrorMessage({ detail: [{ msg: "Value error, Invalid email" }] }, "Failed"))
       .toBe("Invalid email");

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { Icon } from "@/components/icon";
 import { requestJson } from "@/lib/api-client";
+import { newSignupChallenge, readSignupChallenge, signupStorageKey, type SignupChallenge } from "@/lib/signup-challenge";
 
 type FormMode = "login" | "register";
 
@@ -18,8 +19,27 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const isRegister = mode === "register";
-  const [challenge, setChallenge] = useState<string | null>(null);
-  const [registration, setRegistration] = useState<{email: string; password: string; organization_name?: string} | null>(null);
+  const [challenge, setChallenge] = useState<SignupChallenge | null>(null);
+  useEffect(() => {
+    if (!isRegister) return;
+    const fragment = new URLSearchParams(window.location.hash.slice(1)).get("verification");
+    const fromEmail = readSignupChallenge(fragment);
+    if (fromEmail) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate browser-only fragment state after SSR.
+      setChallenge(fromEmail);
+      try { sessionStorage.setItem(signupStorageKey, JSON.stringify(fromEmail)); } catch { /* Storage may be disabled. */ }
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    } else {
+      try { setChallenge(readSignupChallenge(sessionStorage.getItem(signupStorageKey))); } catch { /* Storage may be disabled. */ }
+    }
+  }, [isRegister]);
+  function remember(next: SignupChallenge | null) {
+    setChallenge(next);
+    try {
+      if (next) sessionStorage.setItem(signupStorageKey, JSON.stringify(next));
+      else sessionStorage.removeItem(signupStorageKey);
+    } catch { /* Verification still works without storage. */ }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -33,14 +53,14 @@ export function AuthForm({ mode }: AuthFormProps) {
     };
     try {
       const response = await requestJson<{challenge_id?: string}>(`/api/session/${mode}`, {
+        timeoutMs: isRegister ? 75000 : 15000,
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload)
       });
       if (isRegister) {
         if (!response.challenge_id) throw new Error("Verification could not be started.");
-        setRegistration(payload);
-        setChallenge(response.challenge_id);
+        remember(newSignupChallenge(response.challenge_id, payload.email));
         return;
       }
       router.replace("/dashboard");
@@ -52,8 +72,7 @@ export function AuthForm({ mode }: AuthFormProps) {
     }
   }
 
-  if (challenge && registration) return <SignupVerification challengeId={challenge}
-    registration={registration} onBack={() => { setChallenge(null); setRegistration(null); }} />;
+  if (challenge) return <SignupVerification challenge={challenge} onChange={remember} onBack={() => remember(null)} />;
 
   return (
     <main className="auth-shell">
@@ -138,28 +157,29 @@ export function AuthForm({ mode }: AuthFormProps) {
   );
 }
 
-function SignupVerification({challengeId, registration, onBack}: {
-  challengeId: string;
-  registration: {email: string; password: string; organization_name?: string};
+function SignupVerification({challenge, onChange, onBack}: {
+  challenge: SignupChallenge;
+  onChange: (next: SignupChallenge | null) => void;
   onBack: () => void;
 }) {
   const router = useRouter();
-  const [id, setId] = useState(challengeId);
   const [code, setCode] = useState("");
-  const [wait, setWait] = useState(60);
-  const [expires, setExpires] = useState(600);
+  const [now, setNow] = useState(() => Date.now());
+  const wait = Math.max(0, Math.ceil((challenge.resendAt - now) / 1000));
+  const expires = Math.max(0, Math.ceil((challenge.expiresAt - now) / 1000));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState("Check your inbox and spam folder for your verification code.");
   useEffect(() => {
-    const timer = setInterval(() => { setWait(v => Math.max(0, v - 1)); setExpires(v => Math.max(0, v - 1)); }, 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
   async function verify(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(null);
     try {
-      await requestJson("/api/session/register/verify", {method: "POST",
-        headers: {"content-type": "application/json"}, body: JSON.stringify({challenge_id: id, code})});
+      await requestJson("/api/session/register/verify", {method: "POST", timeoutMs: 45000,
+        headers: {"content-type": "application/json"}, body: JSON.stringify({challenge_id: challenge.id, code})});
+      try { sessionStorage.removeItem(signupStorageKey); } catch { /* Storage may be disabled. */ }
       router.replace("/dashboard"); router.refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Verification failed."); }
     finally { setBusy(false); }
@@ -167,9 +187,10 @@ function SignupVerification({challengeId, registration, onBack}: {
   async function resend() {
     setBusy(true); setError(null);
     try {
-      const result = await requestJson<{challenge_id: string}>("/api/session/register", {
-        method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(registration)});
-      setId(result.challenge_id); setCode(""); setWait(60); setExpires(600);
+      const result = await requestJson<{challenge_id: string}>("/api/session/register/resend", {
+        timeoutMs: 75000,
+        method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({challenge_id: challenge.id})});
+      onChange(newSignupChallenge(result.challenge_id, challenge.email)); setCode(""); setNow(Date.now());
       setNotice("A new code was sent. Only the newest code will work.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "We could not resend the code."); }
     finally { setBusy(false); }
@@ -177,7 +198,7 @@ function SignupVerification({challengeId, registration, onBack}: {
   return <main className="auth-form-side min-h-screen"><section className="auth-card">
     <Link className="brand" href="/">cveator</Link>
     <h1 className="mt-6 text-2xl font-semibold">Verify your email</h1>
-    <p className="mt-3">Enter the six-digit code sent to <strong>{registration.email}</strong>.</p>
+    <p className="mt-3">Enter the six-digit code sent to <strong>{challenge.email}</strong>.</p>
     <p className="mt-3 text-sm" role="status">{notice}</p>
     <form onSubmit={verify} aria-busy={busy}>
       <label htmlFor="signup-code">Verification code</label>

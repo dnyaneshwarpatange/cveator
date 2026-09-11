@@ -5,6 +5,24 @@ a challenge ID (202). POST `/auth/register/verify` accepts `challenge_id` and a
 six-digit `code`; only success creates the organization/user and returns a session.
 Login continues to use a password. Existing accounts are unchanged.
 
+The browser now preserves only the challenge ID, email and absolute expiry/resend
+timestamps in sessionStorage so refreshing the same tab does not lose the OTP
+screen. It does not persist the password or OTP. POST `/auth/register/resend`
+accepts the current `challenge_id` and reuses the existing password hash; it
+rotates the challenge without resetting the per-email send/guess budgets.
+Expired screens allow resending; switching email clears local verification state.
+OTP emails include a return link carrying only challenge metadata in the URL
+fragment. Opening it restores verification, but never signs the user in; the
+separate emailed code is still required. PUBLIC_APP_URL must point to the actual
+application address. A localhost return link is usable only on the local machine.
+
+Browser regression: with the local app running, run
+`node node_modules/@playwright/test/cli.js test` from `frontend`. The test uses
+headless Edge and mocked HTTP responses (no real mail/account); the separate
+PostgreSQL test verifies actual signup/resend/verification and login using a
+capture-only email adapter and rollback transaction. These tests do not prove
+delivery into a real recipient's inbox.
+
 Mail uses the same `SMTP_*` and `EMAIL_FROM_*` settings as alert delivery, through
 the existing EmailSender/SMTP adapter. No new mail vendor or credentials are used.
 The digest enable flag does not disable signup verification mail.

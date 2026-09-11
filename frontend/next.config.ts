@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Repeated Windows preview restarts have restored stale route entries.
+  // Use fresh development compilations there; production build caching is unchanged.
+  experimental: { turbopackFileSystemCacheForDev: process.platform !== "win32" },
   poweredByHeader: false,
   async headers() {
     return [

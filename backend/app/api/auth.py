@@ -30,6 +30,15 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
 
 
+def _account_deletion_service(session):
+    from redis import Redis
+    from app.services.account_deletion import AccountDeletion
+    settings = get_settings()
+    return AccountDeletion(session, Redis.from_url(settings.redis_url, socket_timeout=3, socket_connect_timeout=3),
+                           SmtpEmailSender(SmtpConfiguration.from_settings(settings)),
+                           settings.jwt_secret.get_secret_value())
+
+
 class RegisterRequest(BaseModel):
     organization_name: str = Field(min_length=2, max_length=255)
     email: EmailStr
@@ -75,12 +84,70 @@ class VerifySignupRequest(BaseModel):
     code: str = Field(pattern=r"^[0-9]{6}$")
 
 
+class ResendSignupRequest(BaseModel):
+    challenge_id: UUID
+
+
+@router.post("/register/resend", response_model=SignupChallengeResponse, status_code=202)
+def resend_signup(payload: ResendSignupRequest, request: Request,
+                  session: Annotated[Session, Depends(get_session)]):
+    _enforce_signup_ip_limit(request)
+    try:
+        pending = _signup_service(session).resend(payload.challenge_id)
+        session.commit()
+        return SignupChallengeResponse(challenge_id=pending.id)
+    except SignupThrottled:
+        session.rollback()
+        raise HTTPException(429, "Wait 60 seconds between codes. Maximum five codes or guesses per hour.") from None
+    except (ValueError, EmailAlreadyRegistered):
+        session.rollback()
+        raise HTTPException(400, "Verification request is no longer available. Start signup again or sign in.") from None
+    except Exception:
+        session.rollback()
+        raise HTTPException(503, "Unable to resend verification email. Please try again later.") from None
+
+
+@router.post("/account/deletion-code", status_code=202)
+def request_account_deletion(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    try:
+        result = _account_deletion_service(session).start(principal)
+        session.commit()
+        return result
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception:
+        session.rollback()
+        raise HTTPException(503, "Unable to send deletion code. Please try again later.") from None
+
+
+@router.post("/account/delete", status_code=204)
+def delete_own_account(
+    payload: VerifySignupRequest,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    session: Annotated[Session, Depends(get_session)],
+):
+    try:
+        _account_deletion_service(session).confirm(principal, payload.challenge_id, payload.code)
+        session.commit()
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception:
+        session.rollback()
+        raise HTTPException(503, "Deletion did not complete. Request a new code and try again.") from None
+
+
 def _signup_service(session: Session) -> SignupService:
     settings = get_settings()
     return SignupService(
         session,
         SmtpEmailSender(SmtpConfiguration.from_settings(settings)),
         settings.jwt_secret.get_secret_value(),
+        public_app_url=settings.public_app_url,
     )
 
 

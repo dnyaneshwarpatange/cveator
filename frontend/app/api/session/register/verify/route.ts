@@ -3,9 +3,10 @@ import { backendRequest, sessionCookieName, sessionCookieSecure } from "@/lib/ba
 import type { AuthResponse } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
+  try {
   const response = await backendRequest("/auth/register/verify", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: await request.text()
+    body: await request.text(), signal: AbortSignal.timeout(30000)
   });
   const payload = await response.json().catch(() => ({detail: "Unexpected API response"}));
   if (!response.ok) return NextResponse.json(payload, {status: response.status});
@@ -15,4 +16,7 @@ export async function POST(request: NextRequest) {
     httpOnly: true, secure: sessionCookieSecure, sameSite: "lax",
     maxAge: authenticated.expires_in_seconds, path: "/"});
   return result;
+  } catch {
+    return NextResponse.json({detail: "Verification could not be confirmed. Try signing in first; if the account is still unverified, retry your code."}, {status: 503});
+  }
 }

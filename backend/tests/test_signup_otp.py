@@ -33,13 +33,20 @@ def test_start_sends_smtp_port_message_but_creates_no_account(monkeypatch):
     session, sender = Mock(), Mock()
     session.scalar.side_effect = [None, None]
     monkeypatch.setattr("app.services.signup.secrets.randbelow", lambda _: 123456)
-    service = SignupService(session, sender, "secret")
+    service = SignupService(session, sender, "secret", public_app_url="http://localhost:3002")
     item = service.start(
         organization_name="Team", email="Signup@Example.com", password="a-strong-test-password"
     )
     message = sender.send.call_args.args[0]
     assert message.recipient == "signup@example.com"
     assert "123456" in message.text_body
+    from urllib.parse import unquote
+    import json
+    resume = message.text_body.split("Return to verification: ")[1]
+    assert resume.startswith("http://localhost:3002/register#verification=")
+    metadata = json.loads(unquote(resume.split("#verification=")[1]))
+    assert metadata["id"] == str(item.id)
+    assert "code" not in metadata and "password" not in metadata
     assert item.code_hash != "123456"
     assert item.password_hash != "a-strong-test-password"
     assert session.add.call_count == 1

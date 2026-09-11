@@ -6,5 +6,5 @@ export default async function CvePage({ params }: { params: Promise<{ cveId: str
   if (!await currentSession()) redirect("/login");
   const { cveId } = await params;
   if (!/^CVE-\d{4}-\d{4,}$/i.test(cveId)) notFound();
-  return <VulnerabilityDetailView cveId={cveId.toUpperCase()} />;
+  return <VulnerabilityDetailView key={cveId.toUpperCase()} cveId={cveId.toUpperCase()} />;
 }
